@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Shorts Pipeline sign-in</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 680px; margin: 0 auto; padding: 48px 20px; line-height: 1.6; color: #1d2228; background: #fafbfc; }
+  .muted { color: #5b6470; } a { color: #0b6bcb; }
+  #code { width: 100%; box-sizing: border-box; font: 15px ui-monospace, Menlo, monospace; padding: 12px; border: 1px solid #c7ccd3; border-radius: 8px; background: #fff; word-break: break-all; }
+  button { margin-top: 12px; font-size: 17px; padding: 12px 22px; border: 0; border-radius: 8px; background: #0b6bcb; color: #fff; cursor: pointer; }
+  .err { color: #b3261e; }
+</style>
+</head>
+<body>
+<h1>Shorts Pipeline sign-in</h1>
+<div id="ok" hidden>
+  <p><strong>Step 1.</strong> Click the button to copy your sign-in code.</p>
+  <div id="code"></div>
+  <button id="copy">Copy code</button>
+  <p><strong>Step 2.</strong> Go back to the Cloud Shell tab, click in the black terminal, press <strong>Cmd+V</strong>, then <strong>Return</strong>.</p>
+  <p class="muted">The code works once, for a few minutes, and only together with the private key typed into Cloud Shell. You can close this tab afterwards.</p>
+</div>
+<div id="bad" hidden>
+  <p class="err"><strong>Google didn't send a sign-in code.</strong> <span id="why"></span></p>
+  <p>Go back to Cloud Shell and press <strong>Return</strong> to get a fresh sign-in link, then try again.</p>
+</div>
+<div id="none">
+  <p>This page receives the one-time code after you sign in to Google for <a href="./">Shorts Pipeline</a>. Open it through the add-channel steps.</p>
+</div>
+<script>
+  var q = new URLSearchParams(location.search), code = q.get("code"), err = q.get("error");
+  if (code) {
+    document.getElementById("none").hidden = true;
+    document.getElementById("ok").hidden = false;
+    document.getElementById("code").textContent = code;
+    document.getElementById("copy").onclick = function () {
+      var b = this;
+      navigator.clipboard.writeText(code).then(function () { b.textContent = "Copied"; });
+    };
+    history.replaceState(null, "", location.pathname);  // keep the code out of the address bar and history
+  } else if (err) {
+    document.getElementById("none").hidden = true;
+    document.getElementById("bad").hidden = false;
+    document.getElementById("why").textContent = err === "access_denied" ? "The sign-in was cancelled." : "Google said: " + err;
+  }
+</script>
+</body>
+</html>
