@@ -13,6 +13,8 @@ Nothing secret is printed or saved on disk. Start it with:
   curl -fsSL https://ricardomalliah.github.io/shorts-pipeline-site/add-channel.py -o add-channel.py && python3 add-channel.py
 To reconnect channels that already exist (a fresh sign-in, checked and saved by itself), add the word reconnect:
   curl -fsSL https://ricardomalliah.github.io/shorts-pipeline-site/add-channel.py -o add-channel.py && python3 add-channel.py reconnect
+To switch on the natural Google voices (Chirp 3 HD; 1 million characters a month free), add the word voice:
+  curl -fsSL https://ricardomalliah.github.io/shorts-pipeline-site/add-channel.py -o add-channel.py && python3 add-channel.py voice
 """
 import base64, getpass, hashlib, json, os, random, re, secrets, shutil, subprocess, sys, tarfile, tempfile
 import textwrap, time
@@ -551,9 +553,80 @@ def reconnect():
     if done:
         say(f"\n{G}{B}Done: {', '.join(done)} reconnected.{X} The next daily run uses the new sign-in. You can close this tab.")
 
+# ---------- natural voices (Google Cloud Text-to-Speech) ----------
+
+VOICE_PROJECT = "shorts-money-bits"
+
+
+def voice():
+    """Turn on Text-to-Speech in one existing project, make a key that only works for it, save it as GOOGLE_TTS_API_KEY."""
+    gh = find_gh()
+    github_signin(gh)
+    try:
+        title(2, "Turn on billing for the voice (needed even for the free allowance)")
+        pid = VOICE_PROJECT
+        info = json.loads(gcloud("billing", "projects", "describe", pid, "--format=json").stdout or "{}")
+        if not info.get("billingEnabled"):
+            accounts = json.loads(gcloud("billing", "accounts", "list", "--filter=open=true", "--format=json").stdout or "[]")
+            while not accounts:
+                say(f"""
+                Google needs a payment card on file before it turns on the voice, even though our use stays inside
+                the free 1 million characters a month (about 3 to 4 times what all channels need).
+                  1. Open {B}https://console.cloud.google.com/billing/create{X}
+                  2. Fill in your details and card, then click {B}Submit and enable billing{X}.
+                """)
+                wait()
+                accounts = json.loads(gcloud("billing", "accounts", "list", "--filter=open=true", "--format=json").stdout or "[]")
+            acct = accounts[0]["name"].split("/")[-1]
+            gcloud("billing", "projects", "link", pid, f"--billing-account={acct}")
+        ok("Billing is on for " + pid)
+        say(f"{D}Tip: set a budget alert at https://console.cloud.google.com/billing/budgets (for example $5) so you hear about any charge.{X}")
+
+        title(3, "Turn on the voice and make its key")
+        gcloud("services", "enable", "texttospeech.googleapis.com", "apikeys.googleapis.com", f"--project={pid}")
+        out = gcloud("services", "api-keys", "create", f"--project={pid}", "--display-name=Shorts voice",
+                     "--api-target=service=texttospeech.googleapis.com", "--format=json").stdout
+        key = json.loads(out).get("response", {}).get("keyString") or json.loads(out).get("keyString")
+        if not key:
+            raise RuntimeError("Google made the key but didn't return it; run the command again")
+        test = http_json("https://texttospeech.googleapis.com/v1/text:synthesize", json.dumps({
+            "input": {"text": "Testing."}, "voice": {"languageCode": "en-US", "name": "en-US-Chirp3-HD-Charon"},
+            "audioConfig": {"audioEncoding": "MP3"}}).encode(),
+            {"Content-Type": "application/json", "X-goog-api-key": key})
+        if "audioContent" not in test:
+            say(f"{D}Google sometimes takes a minute to switch a new key on. Waiting...{X}")
+            time.sleep(60)
+        run([gh, "secret", "set", "GOOGLE_TTS_API_KEY", "-R", REPO], input=key)
+        ok("Saved the key as GitHub secret GOOGLE_TTS_API_KEY")
+        add_voice_lines(gh)
+    finally:
+        run([gh, "auth", "logout", "-h", "github.com"], input="y\n", check=False)
+    say(f"\n{G}{B}Done.{X} The next videos use the natural Google voices. You can close this tab.")
+
+
+def add_voice_lines(gh):
+    """Give the render workflows the key (each workflow lists its secrets one by one)."""
+    line = "      GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}"
+    for path in (".github/workflows/daily.yml", ".github/workflows/longform.yml"):
+        try:
+            text, sha = gh_file(gh, REPO, path)
+        except RuntimeError:
+            continue
+        if "GOOGLE_TTS_API_KEY" in text:
+            continue
+        anchor = "      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}"
+        if anchor not in text:
+            continue
+        text = text.replace(anchor, anchor + "\n" + line, 1)
+        run([gh, "api", "-X", "PUT", f"repos/{REPO}/contents/{path}", "-f", "message=Use the Google voice key",
+             "-f", f"content={base64.b64encode(text.encode()).decode()}", "-f", f"sha={sha}"])
+    ok("The daily and long-form runs now get the key")
+
+
 if __name__ == "__main__":
     try:
-        reconnect() if sys.argv[1:2] == ["reconnect"] else main()
+        mode = sys.argv[1:2]
+        reconnect() if mode == ["reconnect"] else voice() if mode == ["voice"] else main()
     except KeyboardInterrupt:
         print("\nStopped. Run the same command again to carry on.")
     except RuntimeError as e:
